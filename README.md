@@ -12,14 +12,14 @@ There are two options to use. One is to use the command, the other is to use the
 
 - If the Discord ID is left empty then the command will be used. 
 
-- If the Discord ID has a a value it will be used.
+- If the Discord ID has a value it will be used.
 
 ## How to set up the script
 
 In the script you will find 3 variables to change and 3 optional variables
 
 1 (Required): Name
-- Put in the name of the brithday holder
+- Put in the name of the birthday holder
 
 2 (Required): Age
 - Put in the age of the birthday holder. This is how many times it will repeat the message. Giving them a birthday wish for every year they've been alive.
@@ -28,11 +28,11 @@ In the script you will find 3 variables to change and 3 optional variables
 - The month and day of the birthday. Used so the bot only works on their birthday.
 
 4 (Optional): Pause
-- How long you want the discord bot to wait inbetween bitrhday messages. Discord will slow you down though because it's basically spam, but funny spam.
+- How long you want the discord bot to wait in between birthday messages. Discord will slow you down though because it's basically spam, but funny spam.
 
 5 (Optional): BirthdayID
 
-- The Discord ID of the user whos birthday it is. You can get this in Discord in developer mode.
+- The Discord ID of the user whose birthday it is. You can get this in Discord in developer mode.
 
 6 (Optional): Command
 
