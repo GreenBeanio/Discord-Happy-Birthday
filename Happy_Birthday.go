@@ -251,8 +251,8 @@ func load_json_file(file_name string) string {
 	// Check if file exists
 	file, err := os.Open(file_name)
 	if err != nil {
-		//Uh oh no file we'll create a new one
-		////////////
+		log.Print("Error opening json file\n", err)
+		os.Exit(5)
 	}
 	//Defer closing the file until the function is complete
 	defer file.Close()
@@ -270,31 +270,11 @@ func load_json_file(file_name string) string {
 
 // Save the Json File
 func save_json_file(file_name string, write_data []byte) {
-	// Check if the file exists
-	exists := file_exists(file_name)
-	// Create variables of an empty pointer
-	file := &os.File{}
-	// If the file exists write to it
-	if exists {
-		// Check if file exists
-		filex, err := os.Open(file_name)
-		if err != nil {
-			fmt.Print("Oh No Exists!")
-			//Uh oh no file we'll create a new one
-		} else {
-			// Assign the new file to the address of the variable
-			file = filex
-		}
-	} else {
-		// Create a file if it doesn't exist
-		filex, err := os.Create(file_name)
-		if err != nil {
-			fmt.Print("Oh No New!")
-			//Uh oh no file we'll create a new one
-		} else {
-			// Assign the new file to the address of the variable
-			file = filex
-		}
+	// Opening the file
+	file, err := os.Open(file_name)
+	if err != nil {
+		log.Print("Error opening json file\n", err)
+		os.Exit(5)
 	}
 	//Defer closing the file until the function is complete
 	defer file.Close()
