@@ -100,11 +100,13 @@ func main() {
 
 func main_discord(done chan bool) {
 	// Get the current day
-	tomorrow := time.Now().Day() + 1
+	current_day := time.Now().YearDay()
 	// Making a channel to keep track of the switching day
 	new_day := make(chan bool)
 	// Create the day tracker
-	go track_day(new_day, tomorrow)
+	go track_day(new_day, current_day)
+	// Getting the closest birthday
+	nearest_birthday := closest_birthday()
 	// Attempting to connect the token
 	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
@@ -126,6 +128,10 @@ func main_discord(done chan bool) {
 		log.Print(fmt.Sprintf("Can't establish a connection with the bot\n%v", err))
 		os.Exit(4)
 	}
+	// Add a custom name
+	dg.UserUpdate("The Birthday Friend", "") // Seems to only work randomly?
+	// Add the custom activity
+	dg.UpdateGameStatus(0, fmt.Sprintf("Birthday in %d days!", nearest_birthday))
 	// Defer closing the connection until the main loop is done
 	defer dg.Close()
 	// Using a channel to keep the discord bot running, and restart every day
@@ -133,14 +139,6 @@ func main_discord(done chan bool) {
 	case <-new_day:
 		done <- true
 	}
-}
-
-// Track when it becomes a new day
-func track_day(new_day chan bool, tomorrow int) {
-	for time.Now().Minute() < tomorrow {
-		time.Sleep(1 * time.Minute)
-	}
-	new_day <- true
 }
 
 // Discord message function
@@ -262,6 +260,41 @@ func has_spoken(id string) bool {
 		}
 	}
 	return false
+}
+
+// Track when it becomes a new day
+func track_day(new_day chan bool, current_day int) {
+	for time.Now().YearDay() == current_day {
+		time.Sleep(1 * time.Minute)
+	}
+	new_day <- true
+}
+
+// Find when the closest birthday is (hopefully leap years don't mess it up much)
+func closest_birthday() int {
+	today_ := time.Now().YearDay()
+	closest_birthday := 367
+	// Check each known person
+	for i := 0; i < len(People); i++ {
+		temp_distace := 367
+		// Get the days until their birthday
+		person_day := People[i].Birthday.YearDay()
+		if person_day >= today_ {
+			// Create a version of their birthday this year
+			temp_bd := time.Date(time.Now().Year(), People[i].Birthday.Month(), People[i].Birthday.Day(), 0, 0, 0, 0, time.UTC)
+			temp_bd2 := temp_bd.Sub(time.Now())
+			temp_distace = int(temp_bd2.Hours() / 24)
+		} else if person_day < today_ {
+			// Create a version of their birthday for next year
+			temp_bd := time.Date(time.Now().Year()+1, People[i].Birthday.Month(), People[i].Birthday.Day(), 0, 0, 0, 0, time.UTC)
+			temp_bd2 := temp_bd.Sub(time.Now())
+			temp_distace = int(temp_bd2.Hours() / 24)
+		}
+		if temp_distace < closest_birthday {
+			closest_birthday = temp_distace
+		}
+	}
+	return closest_birthday
 }
 
 // #endregion Discord Code
