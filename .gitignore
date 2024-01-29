@@ -5,6 +5,10 @@
 *.so
 *.dylib
 
+# Data files
+people.json
+discord.json
+
 # Test binary, built with `go test -c`
 *.test
 
