@@ -38,13 +38,13 @@ func main() {
 	// Attempting to connect the token
 	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
-		log.Print("Can't connect to the discord token\n", err)
+		log.Print(fmt.Sprintf("Can't connect to the discord token\n%v", err))
 		os.Exit(4)
 	}
 	// Attempting to get the userID of the bot
 	user, err := dg.User("@me")
 	if err != nil {
-		log.Print("Can't get the discord bots user ID\n", err)
+		log.Print(fmt.Sprintf("Can't get the discord bots user ID\n%v", err))
 		os.Exit(4)
 	}
 	BotID = user.ID
@@ -53,7 +53,7 @@ func main() {
 	// Attempting to open the connection to the bot
 	err = dg.Open()
 	if err != nil {
-		log.Print("Can't establish a connection with the bot\n", err)
+		log.Print(fmt.Sprintf("Can't establish a connection with the bot\n%v", err))
 		os.Exit(4)
 	}
 	// Defer closing the connection until the main loop is done
@@ -222,7 +222,7 @@ func save_people_to_json(people_raw []Person) []byte {
 	if err != nil {
 		//panic(err)
 		//log.Fatal(err)
-		log.Print("Error with saving people to json\n", err)
+		log.Print(fmt.Sprintf("Error with saving people to json\n%v", err))
 		os.Exit(2)
 	}
 	// Returning the json in bytes
@@ -239,7 +239,7 @@ func load_json_to_person(json_string string) []Person {
 	err := json.Unmarshal(buffered_string, empty_people)
 	// Panic if there is an error
 	if err != nil {
-		log.Print("Error with loading people to json\n", err)
+		log.Print(fmt.Sprintf("Error with loading people to json\n%v", err))
 		os.Exit(3)
 	}
 	// Return the people object
@@ -251,7 +251,7 @@ func load_json_file(file_name string) string {
 	// Check if file exists
 	file, err := os.Open(file_name)
 	if err != nil {
-		log.Print("Error opening json file\n", err)
+		log.Print(fmt.Sprintf("Error opening json file\n%v", err))
 		os.Exit(5)
 	}
 	//Defer closing the file until the function is complete
@@ -271,19 +271,31 @@ func load_json_file(file_name string) string {
 // Save the Json File
 func save_json_file(file_name string, write_data []byte) {
 	// Opening the file
-	file, err := os.Open(file_name)
+	//file, err := os.Open(file_name)
+	file, err := os.Create(file_name) // Using create because if I use Open it says access denied, creating will truncate/replace the old file
 	if err != nil {
-		log.Print("Error opening json file\n", err)
+		log.Print(fmt.Sprintf("Error opening json file\n%v", err))
 		os.Exit(5)
 	}
-	//Defer closing the file until the function is complete
-	defer file.Close()
 	// Buffer to read from the file
 	file_buffer := bufio.NewWriter(file)
-	// Defer flushing the writer until the function is complete
-	defer file_buffer.Flush()
 	// Write the data to the file
-	file_buffer.Write(write_data)
+	_, err2 := file_buffer.Write(write_data)
+	if err2 != nil {
+		log.Print(fmt.Sprintf("Error writing to json file\n%v", err2))
+		os.Exit(5)
+	}
+	//Defer flushing and closing the file until the rest of the function is complete
+	defer func() {
+		// Flushing the buffer to finish writing the file
+		err3 := file_buffer.Flush()
+		if err3 != nil {
+			log.Print(fmt.Sprintf("Error flushing the buffer to write the json file\n%v", err3))
+			os.Exit(5)
+		}
+		// Close the file after the flush
+		file.Close()
+	}()
 }
 
 // Check if a file exists
@@ -305,6 +317,8 @@ func both_exist(people_file string, credentials_file string) bool {
 	credentials_exist := true
 	// Test if the people file exists
 	if !file_exists(people_file) {
+		// Create the file
+		create_json_file(people_file)
 		// Set boolean and send message
 		people_exist = false
 		log.Print("Fill in the people file")
@@ -317,6 +331,8 @@ func both_exist(people_file string, credentials_file string) bool {
 	}
 	// Test if the credentials file exists
 	if !file_exists(credentials_file) {
+		// Create the file
+		create_json_file(credentials_file)
 		// Set boolean and send message
 		credentials_exist = false
 		log.Print("Fill in the discord file")
@@ -338,7 +354,7 @@ func save_discord_to_json(discord_raw Discord_Credential) []byte {
 	json_discord, err := json.Marshal(discord_raw)
 	// Check that there isn't an error
 	if err != nil {
-		log.Print("Error with saving discord credentials to json\n", err)
+		log.Print(fmt.Sprintf("Error with saving discord credentials to json\n%v", err))
 		os.Exit(2)
 	}
 	// Returning the json in bytes
@@ -355,7 +371,7 @@ func load_json_to_discord(json_string string) Discord_Credential {
 	err := json.Unmarshal(buffered_string, empty_discord)
 	// Panic if there is an error
 	if err != nil {
-		log.Print("Error with loading discord credentials from json\n", err)
+		log.Print(fmt.Sprintf("Error with loading discord credentials from json\n%v", err))
 		os.Exit(3)
 	}
 	// Return the people object
@@ -374,4 +390,14 @@ func save_to_json(people_ bool, discord_ bool) {
 		byte_discord := save_discord_to_json(Discord_Credentials)
 		save_json_file("discord.json", byte_discord)
 	}
+}
+
+// Create a file
+func create_json_file(file_name string) {
+	file, err := os.Create(file_name)
+	if err != nil {
+		log.Print(fmt.Sprintf("Error when creating a new json file\n%v", err))
+		os.Exit(2)
+	}
+	defer file.Close()
 }
