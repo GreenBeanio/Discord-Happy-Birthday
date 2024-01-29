@@ -1,5 +1,6 @@
 package main
 
+// #region Imports
 import (
 	"bufio"
 	"encoding/json"
@@ -14,6 +15,10 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 )
+
+// #endregion Imports
+
+// #region Variables
 
 // Track the state of the bot
 var silenced bool = false
@@ -37,7 +42,7 @@ var pause = 500 // Milliseconds to pause between birthday messages
 var People []Person                        // Variable to hold people
 var Discord_Credentials Discord_Credential // Variable to hold discord token
 
-//#endregion Variables
+// #endregion Variables
 
 // #region Structs
 
@@ -56,7 +61,7 @@ type Person struct {
 
 // #endregion Structs
 
-//region Main Code
+// #region Main Code
 
 // Initialize my variables (will load from a file in the future)
 func init() {
@@ -79,6 +84,27 @@ func init() {
 
 // Main function
 func main() {
+	// Making a channel to keep the program running
+	discord_channel := make(chan bool)
+	// Running the main discord function
+	go main_discord(discord_channel)
+	// Waiting for the channel
+	<-discord_channel
+	// Restart the main loop for the new day. Is this proper?
+	main()
+}
+
+// #endregion Main Code
+
+// #region Discord Code
+
+func main_discord(done chan bool) {
+	// Get the current day
+	tomorrow := time.Now().Day() + 1
+	// Making a channel to keep track of the switching day
+	new_day := make(chan bool)
+	// Create the day tracker
+	go track_day(new_day, tomorrow)
 	// Attempting to connect the token
 	dg, err := discordgo.New("Bot " + token)
 	if err != nil {
@@ -102,25 +128,30 @@ func main() {
 	}
 	// Defer closing the connection until the main loop is done
 	defer dg.Close()
-	// Keep the code running indefinitely
-	for {
+	// Using a channel to keep the discord bot running, and restart every day
+	switch {
+	case <-new_day:
+		done <- true
 	}
 }
 
-//endregion Main Code
-
-//region Discord Code
+// Track when it becomes a new day
+func track_day(new_day chan bool, tomorrow int) {
+	for time.Now().Minute() < tomorrow {
+		time.Sleep(1 * time.Minute)
+	}
+	new_day <- true
+}
 
 // Discord message function
 func Happy_Birthday(dg *discordgo.Session, message *discordgo.MessageCreate) {
 	/* Debug: Message Info
-	fmt.Print("\n Author: ",message.Author.ID)
-	fmt.Print("\n Channel: ",message.ChannelID)
-	fmt.Print("\n Message: ",message.Content)
-	fmt.Print("\n Server: ",message.GuildID) */
+	fmt.Println("\n Author: ",message.Author.ID)
+	fmt.Println("\n Channel: ",message.ChannelID)
+	fmt.Println("\n Message: ",message.Content)
+	fmt.Println("\n Server: ",message.GuildID) */
 	// Variable to determine result
 	send_message := false
-	age := 0
 	message_ := message.Content // Have to save this separate for the rune conversion
 	// Listen to the command
 	if message.Author.ID == BotID { // Don't listen to yourself silly
@@ -157,7 +188,6 @@ func Happy_Birthday(dg *discordgo.Session, message *discordgo.MessageCreate) {
 			save_to_json(true, true)
 			log.Print("Saved and Shut Down as Planned")
 			os.Exit(0)
-			os.Exit(1)
 		}
 	} else if known_user(message.Author.ID) && silenced == false && has_spoken(message.Author.ID) == false { // Check if the user is known
 		send_message = true
@@ -168,6 +198,8 @@ func Happy_Birthday(dg *discordgo.Session, message *discordgo.MessageCreate) {
 	}
 	// If send message is true check the date
 	if send_message == true {
+		// Set age
+		age := 0
 		// Get person
 		temp_p := get_user(message.Author.ID)
 		// Check for birthday
@@ -232,9 +264,9 @@ func has_spoken(id string) bool {
 	return false
 }
 
-//endregion Discord Code
+// #endregion Discord Code
 
-//#region JSON Code
+// #region JSON Code
 
 // Save the Json File
 func save_json_file(file_name string, write_data []byte) {
@@ -424,4 +456,4 @@ func create_json_file(file_name string) {
 	defer file.Close()
 }
 
-//#endregion JSON Code
+// #endregion JSON Code
