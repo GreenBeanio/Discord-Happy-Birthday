@@ -33,6 +33,50 @@ var token string
 // Set Variables for delay
 var pause = 500 // Milliseconds to pause between birthday messages
 
+// Variables to hold loaded information
+var People []Person                        // Variable to hold people
+var Discord_Credentials Discord_Credential // Variable to hold discord token
+
+//#endregion Variables
+
+// #region Structs
+
+// Struct to hold the information about discord
+type Discord_Credential struct {
+	Token string `json:"token"`
+}
+
+// Struct to hold information about people
+type Person struct {
+	Id        string    `json:"id"`
+	Name      string    `json:"name"`
+	Birthday  time.Time `json:"birthday"`
+	Responses []string  `json:"responses"`
+}
+
+// #endregion Structs
+
+//region Main Code
+
+// Initialize my variables (will load from a file in the future)
+func init() {
+	// Check if the files exist
+	continue_or_not := both_exist("people.json", "discord.json")
+	// Only continue if both files exist
+	if continue_or_not {
+		// Load and convert the discord file
+		discord_json := load_json_file("discord.json")
+		Discord_Credentials = load_json_to_discord(discord_json)
+		token = Discord_Credentials.Token
+		// Load and convert the people file
+		people_json := load_json_file("people.json")
+		People = load_json_to_person(people_json)
+	} else {
+		log.Print("No data files")
+		os.Exit(1)
+	}
+}
+
 // Main function
 func main() {
 	// Attempting to connect the token
@@ -63,42 +107,11 @@ func main() {
 	}
 }
 
-// Struct to hold the information about discord
-type Discord_Credential struct {
-	Token string `json:"token"`
-}
+//endregion Main Code
 
-// Struct to hold information about people
-type Person struct {
-	Id        string    `json:"id"`
-	Name      string    `json:"name"`
-	Birthday  time.Time `json:"birthday"`
-	Responses []string  `json:"responses"`
-}
+//region Discord Code
 
-var People []Person                        // Variable to hold people
-var Discord_Credentials Discord_Credential // Variable to hold discord token
-
-// Initialize my variables (will load from a file in the future)
-func init() {
-	// Check if the files exist
-	continue_or_not := both_exist("people.json", "discord.json")
-	// Only continue if both files exist
-	if continue_or_not {
-		// Load and convert the discord file
-		discord_json := load_json_file("discord.json")
-		Discord_Credentials = load_json_to_discord(discord_json)
-		token = Discord_Credentials.Token
-		// Load and convert the people file
-		people_json := load_json_file("people.json")
-		People = load_json_to_person(people_json)
-	} else {
-		log.Print("No data files")
-		os.Exit(1)
-	}
-}
-
-// Message function
+// Discord message function
 func Happy_Birthday(dg *discordgo.Session, message *discordgo.MessageCreate) {
 	/* Debug: Message Info
 	fmt.Print("\n Author: ",message.Author.ID)
@@ -140,6 +153,11 @@ func Happy_Birthday(dg *discordgo.Session, message *discordgo.MessageCreate) {
 			} else {
 				dg.ChannelMessageSend(message.ChannelID, "I can speak now!")
 			}
+		case "!quit":
+			save_to_json(true, true)
+			log.Print("Saved and Shut Down as Planned")
+			os.Exit(0)
+			os.Exit(1)
 		}
 	} else if known_user(message.Author.ID) && silenced == false && has_spoken(message.Author.ID) == false { // Check if the user is known
 		send_message = true
@@ -214,59 +232,9 @@ func has_spoken(id string) bool {
 	return false
 }
 
-// Saving a People to Json
-func save_people_to_json(people_raw []Person) []byte {
-	// Convert the struct into json
-	json_person, err := json.Marshal(people_raw)
-	// Check that there isn't an error
-	if err != nil {
-		//panic(err)
-		//log.Fatal(err)
-		log.Print(fmt.Sprintf("Error with saving people to json\n%v", err))
-		os.Exit(2)
-	}
-	// Returning the json in bytes
-	return json_person
-}
+//endregion Discord Code
 
-// Loading People from Json
-func load_json_to_person(json_string string) []Person {
-	// Creating a pointer to an empty person
-	empty_people := &[]Person{}
-	// Converting the string into bytes
-	buffered_string := []byte(json_string)
-	// Convert the json into a struct
-	err := json.Unmarshal(buffered_string, empty_people)
-	// Panic if there is an error
-	if err != nil {
-		log.Print(fmt.Sprintf("Error with loading people to json\n%v", err))
-		os.Exit(3)
-	}
-	// Return the people object
-	return *empty_people
-}
-
-// Load the Json file
-func load_json_file(file_name string) string {
-	// Check if file exists
-	file, err := os.Open(file_name)
-	if err != nil {
-		log.Print(fmt.Sprintf("Error opening json file\n%v", err))
-		os.Exit(5)
-	}
-	//Defer closing the file until the function is complete
-	defer file.Close()
-	// String builder to concat the read strings together
-	var read_string strings.Builder
-	// Buffer to read from the file
-	file_buffer := bufio.NewScanner(file)
-	// Reading each line from the file
-	for file_buffer.Scan() {
-		read_string.WriteString(file_buffer.Text())
-	}
-	// Return the string
-	return read_string.String()
-}
+//#region JSON Code
 
 // Save the Json File
 func save_json_file(file_name string, write_data []byte) {
@@ -296,6 +264,90 @@ func save_json_file(file_name string, write_data []byte) {
 		// Close the file after the flush
 		file.Close()
 	}()
+}
+
+// Load the Json file
+func load_json_file(file_name string) string {
+	// Check if file exists
+	file, err := os.Open(file_name)
+	if err != nil {
+		log.Print(fmt.Sprintf("Error opening json file\n%v", err))
+		os.Exit(5)
+	}
+	//Defer closing the file until the function is complete
+	defer file.Close()
+	// String builder to concat the read strings together
+	var read_string strings.Builder
+	// Buffer to read from the file
+	file_buffer := bufio.NewScanner(file)
+	// Reading each line from the file
+	for file_buffer.Scan() {
+		read_string.WriteString(file_buffer.Text())
+	}
+	// Return the string
+	return read_string.String()
+}
+
+// Saving a People to Json
+func save_people_to_json(people_raw []Person) []byte {
+	// Convert the struct into json
+	json_person, err := json.MarshalIndent(people_raw, "", "    ")
+	// Check that there isn't an error
+	if err != nil {
+		//panic(err)
+		//log.Fatal(err)
+		log.Print(fmt.Sprintf("Error with saving people to json\n%v", err))
+		os.Exit(2)
+	}
+	// Returning the json in bytes
+	return json_person
+}
+
+// Saving Credentials to Json
+func save_discord_to_json(discord_raw Discord_Credential) []byte {
+	// Convert the struct into json
+	json_discord, err := json.MarshalIndent(discord_raw, "", "    ")
+	// Check that there isn't an error
+	if err != nil {
+		log.Print(fmt.Sprintf("Error with saving discord credentials to json\n%v", err))
+		os.Exit(2)
+	}
+	// Returning the json in bytes
+	return json_discord
+}
+
+// Loading People from Json
+func load_json_to_person(json_string string) []Person {
+	// Creating a pointer to an empty person
+	empty_people := &[]Person{}
+	// Converting the string into bytes
+	buffered_string := []byte(json_string)
+	// Convert the json into a struct
+	err := json.Unmarshal(buffered_string, empty_people)
+	// Panic if there is an error
+	if err != nil {
+		log.Print(fmt.Sprintf("Error with loading people to json\n%v", err))
+		os.Exit(3)
+	}
+	// Return the people object
+	return *empty_people
+}
+
+// Loading Credentials from Json
+func load_json_to_discord(json_string string) Discord_Credential {
+	// Creating a pointer to an empty person
+	empty_discord := &Discord_Credential{}
+	// Converting the string into bytes
+	buffered_string := []byte(json_string)
+	// Convert the json into a struct
+	err := json.Unmarshal(buffered_string, empty_discord)
+	// Panic if there is an error
+	if err != nil {
+		log.Print(fmt.Sprintf("Error with loading discord credentials from json\n%v", err))
+		os.Exit(3)
+	}
+	// Return the people object
+	return *empty_discord
 }
 
 // Check if a file exists
@@ -348,36 +400,6 @@ func both_exist(people_file string, credentials_file string) bool {
 	}
 }
 
-// Saving a People to Json
-func save_discord_to_json(discord_raw Discord_Credential) []byte {
-	// Convert the struct into json
-	json_discord, err := json.Marshal(discord_raw)
-	// Check that there isn't an error
-	if err != nil {
-		log.Print(fmt.Sprintf("Error with saving discord credentials to json\n%v", err))
-		os.Exit(2)
-	}
-	// Returning the json in bytes
-	return json_discord
-}
-
-// Loading People from Json
-func load_json_to_discord(json_string string) Discord_Credential {
-	// Creating a pointer to an empty person
-	empty_discord := &Discord_Credential{}
-	// Converting the string into bytes
-	buffered_string := []byte(json_string)
-	// Convert the json into a struct
-	err := json.Unmarshal(buffered_string, empty_discord)
-	// Panic if there is an error
-	if err != nil {
-		log.Print(fmt.Sprintf("Error with loading discord credentials from json\n%v", err))
-		os.Exit(3)
-	}
-	// Return the people object
-	return *empty_discord
-}
-
 // Save to JSON
 func save_to_json(people_ bool, discord_ bool) {
 	if people_ {
@@ -392,7 +414,7 @@ func save_to_json(people_ bool, discord_ bool) {
 	}
 }
 
-// Create a file
+// Create a new file
 func create_json_file(file_name string) {
 	file, err := os.Create(file_name)
 	if err != nil {
@@ -401,3 +423,5 @@ func create_json_file(file_name string) {
 	}
 	defer file.Close()
 }
+
+//#endregion JSON Code
