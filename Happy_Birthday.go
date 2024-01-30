@@ -84,6 +84,8 @@ func init() {
 
 // Main function
 func main() {
+	// Reset the people who have talked
+	spoken = nil
 	// Making a channel to keep the program running
 	discord_channel := make(chan bool)
 	// Running the main discord function
