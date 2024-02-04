@@ -65,7 +65,6 @@ type Person struct {
 type DM_Response struct {
 	option string
 	stage  int
-	guild  string
 }
 
 // #endregion Structs
@@ -134,7 +133,7 @@ func main_discord(done chan bool) {
 	// Creating the handler to scan the messages
 	dg.AddHandler(Happy_Birthday)
 	// Add intents
-	dg.Identify.Intents = discordgo.IntentsAllWithoutPrivileged | discordgo.IntentGuildMembers
+	dg.Identify.Intents = discordgo.IntentsAllWithoutPrivileged
 	// Attempting to open the connection to the bot
 	err = dg.Open()
 	if err != nil {
@@ -280,9 +279,7 @@ func hand_dm_commands(option string, dg *discordgo.Session, message *discordgo.M
 	}
 	// If the user doesn't have an open dm add them to the map
 	if is_user_in_dm(message.Author.ID) {
-		DM_Sessions[message.Author.ID] = DM_Response{option: option, stage: 0, guild: message.GuildID}
-		fmt.Println(message.GuildID)
-		fmt.Print(dg.RequestGuildMembers(message.GuildID, "", 0, false))
+		DM_Sessions[message.Author.ID] = DM_Response{option: option, stage: 0}
 		dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("I sent you a DM %s", discord_id_format(message.Author.ID)))
 		if option == "response" {
 			dg.ChannelMessageSend(user.ID, fmt.Sprintf("Hello %s! Did you mean to add a response to a user?\n\"Yes\" or \"No\"", discord_id_format(message.Author.ID)))
