@@ -43,7 +43,7 @@ var People []Person                        // Variable to hold people
 var Discord_Credentials Discord_Credential // Variable to hold discord token
 
 // Variable for tracking direct message sessions (Trying a map instead of a struct)
-var DM_Sessions = map[string]string{}
+var DM_Sessions = map[string]DM_Response{}
 
 // #endregion Variables
 
@@ -60,6 +60,12 @@ type Person struct {
 	Name      string    `json:"name"`
 	Birthday  time.Time `json:"birthday"`
 	Responses []string  `json:"responses"`
+}
+
+type DM_Response struct {
+	option string
+	stage  int
+	guild  string
 }
 
 // #endregion Structs
@@ -127,6 +133,8 @@ func main_discord(done chan bool) {
 	BotID = user.ID
 	// Creating the handler to scan the messages
 	dg.AddHandler(Happy_Birthday)
+	// Add intents
+	dg.Identify.Intents = discordgo.IntentsAllWithoutPrivileged | discordgo.IntentGuildMembers
 	// Attempting to open the connection to the bot
 	err = dg.Open()
 	if err != nil {
@@ -153,7 +161,10 @@ func Happy_Birthday(dg *discordgo.Session, message *discordgo.MessageCreate) {
 	fmt.Println("\n Channel: ",message.ChannelID)
 	fmt.Println("\n Message: ",message.Content)
 	fmt.Println("\n Server: ",message.GuildID) */
-	// If the message is from a server
+	// Don't do anything if it's the bot itself or another bot
+	if message.Author.ID == BotID || message.Author.Bot { // Don't listen to yourself or other bots silly
+		return
+	}
 	if message.GuildID != "" {
 		handle_server_messages(dg, message)
 	} else {
@@ -163,12 +174,6 @@ func Happy_Birthday(dg *discordgo.Session, message *discordgo.MessageCreate) {
 
 // Handling the messages from the server
 func handle_server_messages(dg *discordgo.Session, message *discordgo.MessageCreate) {
-	// Don't do anything if it's the bot itself or another bot
-	if message.Author.ID == BotID { // Don't listen to yourself silly
-		return
-	} else if message.Author.Bot { // Don't listen to other bots silly head
-		return
-	}
 	// Check if it is silenced and should be unsilenced
 	if silenced == true && time.Now().After(silenced_time) { // Should really just be done with a timer or something else
 		silenced = false
@@ -220,6 +225,8 @@ func handle_server_messages(dg *discordgo.Session, message *discordgo.MessageCre
 		case "!remove_me":
 			hand_dm_commands("remove", dg, message)
 			return
+		case "!update_me":
+			hand_dm_commands("edit", dg, message)
 		default: // For an unknown command
 			return
 		}
@@ -262,38 +269,6 @@ func handle_server_messages(dg *discordgo.Session, message *discordgo.MessageCre
 	}
 }
 
-// Handling the messages from DMs
-func handle_direct_messages(dg *discordgo.Session, message *discordgo.MessageCreate) {
-	// Listen to the command
-	if message.Author.ID == BotID { // Don't listen to yourself silly
-		return
-	} else if message.Author.Bot { // Don't listen to other bots, not sure why a bot would dm another but, but just in case
-		return
-	}
-	//Get the user
-	user, err := dg.UserChannelCreate(message.Author.ID)
-	if err != nil {
-		log.Print(fmt.Sprintf("Error with reading a direct message\n%v", err))
-		dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Sorry, %s there was an error with your message", discord_id_format(message.Author.ID)))
-		return
-	}
-	// If the user has an active DM
-	if !is_user_in_dm(user.ID) {
-		if DM_Sessions[user.ID] == "response" {
-			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Hello %s! Tell me the username of the user you'd like to add a response to!", discord_id_format(message.Author.ID)))
-			delete(DM_Sessions, user.ID)
-		} else if DM_Sessions[user.ID] == "add" {
-			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Hello %s! You would like to add your information!", discord_id_format(message.Author.ID)))
-			delete(DM_Sessions, user.ID)
-		} else if DM_Sessions[user.ID] == "remove" {
-			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Hello %s! You would like to delete your information!", discord_id_format(message.Author.ID)))
-			delete(DM_Sessions, user.ID)
-		}
-	} else {
-		dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("You don't have any DMs active %s!", discord_id_format(message.Author.ID)))
-	}
-}
-
 // Handling commands that interact require DMS
 func hand_dm_commands(option string, dg *discordgo.Session, message *discordgo.MessageCreate) {
 	// Get the user
@@ -304,19 +279,74 @@ func hand_dm_commands(option string, dg *discordgo.Session, message *discordgo.M
 		return
 	}
 	// If the user doesn't have an open dm add them to the map
-	if is_user_in_dm(user.ID) {
-		DM_Sessions[user.ID] = option
+	if is_user_in_dm(message.Author.ID) {
+		DM_Sessions[message.Author.ID] = DM_Response{option: option, stage: 0, guild: message.GuildID}
+		fmt.Println(message.GuildID)
+		fmt.Print(dg.RequestGuildMembers(message.GuildID, "", 0, false))
 		dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("I sent you a DM %s", discord_id_format(message.Author.ID)))
 		if option == "response" {
-			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Hello %s! What is the username of the person you'd like to add a response for?", discord_id_format(message.Author.ID)))
-		} else if option == "add" {
-			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Hello %s! What is your name?", discord_id_format(message.Author.ID)))
-		} else if option == "remove" {
-			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Hello %s. Exactly type \"Delete %s\" to delete data about you.", discord_id_format(message.Author.ID), discord_id_format(message.Author.ID)))
-		}
-		// If the user does have an open dm remind them
-	} else {
+			dg.ChannelMessageSend(user.ID, fmt.Sprintf("Hello %s! Did you mean to add a response to a user?\n\"Yes\" or \"No\"", discord_id_format(message.Author.ID)))
+		} // else if option == "add" {
+		// 	dg.ChannelMessageSend(user.ID, fmt.Sprintf("Hello %s! What is your name?", discord_id_format(message.Author.ID)))
+		// } else if option == "remove" {
+		// 	dg.ChannelMessageSend(user.ID, fmt.Sprintf("Hello %s. Exactly type \"Delete %s\" to delete data about you.", discord_id_format(message.Author.ID), discord_id_format(message.Author.ID)))
+		// }
+	} else { // If the user does have an open dm remind them
 		dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("You already have an open DM %s!", discord_id_format(message.Author.ID)))
+	}
+}
+
+// Handling the messages from DMs
+func handle_direct_messages(dg *discordgo.Session, message *discordgo.MessageCreate) {
+	// If the user has an active DM
+	if !is_user_in_dm(message.Author.ID) {
+		switch DM_Sessions[message.Author.ID].option {
+		case "response":
+			hand_dm_response(DM_Sessions[message.Author.ID].stage, dg, message)
+		case "add":
+			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Hello %s! You would like to add your information!", discord_id_format(message.Author.ID)))
+			delete(DM_Sessions, message.Author.ID)
+		case "remove":
+			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Hello %s! You would like to delete your information!", discord_id_format(message.Author.ID)))
+			delete(DM_Sessions, message.Author.ID)
+		case "edit":
+			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Hello %s! You would you like to edit your information!", discord_id_format(message.Author.ID)))
+			delete(DM_Sessions, message.Author.ID)
+		}
+	} else {
+		dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("You don't have any DMs active %s!", discord_id_format(message.Author.ID)))
+	}
+}
+
+// Function to handle quitting DMs
+func hand_dm_quit(complete bool, dg *discordgo.Session, message *discordgo.MessageCreate) {
+	if complete {
+		dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("See you next time %s!", discord_id_format(message.Author.ID)))
+		delete(DM_Sessions, message.Author.ID)
+	} else {
+		dg.ChannelMessageSend(message.ChannelID, "No problem. Talk to you next time!")
+		delete(DM_Sessions, message.Author.ID)
+	}
+}
+
+// Handling the response command DM
+func hand_dm_response(stage int, dg *discordgo.Session, message *discordgo.MessageCreate) {
+	// If the user quits
+	if message.Content == "Quit" {
+		hand_dm_quit(false, dg, message)
+	}
+	switch stage {
+	case 0:
+		if message.Content == "Yes" {
+			dg.ChannelMessageSend(message.ChannelID, "Great! What is the username of the user you'd like to add a response to?")
+		} else if message.Content == "No" {
+			dg.ChannelMessageSend(message.ChannelID, "No problem. Talk to you next time!")
+		} else {
+			dg.ChannelMessageSend(message.ChannelID, "That input was incorrect!")
+			// Go back to the first input
+		}
+	case 1:
+		dg.User("767878567760625675")
 	}
 }
 
