@@ -42,6 +42,9 @@ var pause = 500 // Milliseconds to pause between birthday messages
 var People []Person                        // Variable to hold people
 var Discord_Credentials Discord_Credential // Variable to hold discord token
 
+// Variable for tracking direct message sessions (Trying a map instead of a struct)
+var DM_Sessions = map[string]string{}
+
 // #endregion Variables
 
 // #region Structs
@@ -87,7 +90,7 @@ func main() {
 	// Reset the people who have talked
 	spoken = nil
 	// Making a channel to keep the program running
-	discord_channel := make(chan bool)
+	discord_channel := make(chan bool, 1)
 	// Running the main discord function
 	go main_discord(discord_channel)
 	// Waiting for the channel
@@ -104,7 +107,7 @@ func main_discord(done chan bool) {
 	// Get the current day
 	current_day := time.Now().YearDay()
 	// Making a channel to keep track of the switching day
-	new_day := make(chan bool)
+	new_day := make(chan bool, 1)
 	// Create the day tracker
 	go track_day(new_day, current_day)
 	// Getting the closest birthday
@@ -150,15 +153,29 @@ func Happy_Birthday(dg *discordgo.Session, message *discordgo.MessageCreate) {
 	fmt.Println("\n Channel: ",message.ChannelID)
 	fmt.Println("\n Message: ",message.Content)
 	fmt.Println("\n Server: ",message.GuildID) */
-	// Variable to determine result
-	send_message := false
-	message_ := message.Content // Have to save this separate for the rune conversion
-	// Listen to the command
+	// If the message is from a server
+	if message.GuildID != "" {
+		handle_server_messages(dg, message)
+	} else {
+		handle_direct_messages(dg, message)
+	}
+}
+
+// Handling the messages from the server
+func handle_server_messages(dg *discordgo.Session, message *discordgo.MessageCreate) {
+	// Don't do anything if it's the bot itself or another bot
 	if message.Author.ID == BotID { // Don't listen to yourself silly
-		send_message = false
+		return
 	} else if message.Author.Bot { // Don't listen to other bots silly head
-		send_message = false
-	} else if string([]rune(message_)[0]) == "!" { // If it is a command
+		return
+	}
+	// Check if it is silenced and should be unsilenced
+	if silenced == true && time.Now().After(silenced_time) { // Should really just be done with a timer or something else
+		silenced = false
+		dg.UpdateGameStatus(0, fmt.Sprintf("Birthday in %d days!", closest_birthday()))
+	}
+	// Listen to the user inputs
+	if string([]rune(message.Content)[0]) == "!" { // If it is a command
 		//Split for the keyword
 		split_command := strings.Split(message.Content, " ")
 		sent_command := split_command[0]
@@ -167,68 +184,139 @@ func Happy_Birthday(dg *discordgo.Session, message *discordgo.MessageCreate) {
 		case "!help":
 			dg.ChannelMessageSend(message.ChannelID,
 				"```!help\t\tTo show more commands.\n!silence\tTo silence the bot for an hour.\n!talk\t\tTo un-silence the bot.\n!check\tCheck the time until un-silenced.```")
+			return
 		case "!silence":
 			silenced = true
 			silenced_time = time.Now().Add(time.Hour)
-			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf(":sob: I will be silenced until %s :sob:", silenced_time.Format("2006-01-02 03:04:05 MST")))
+			dg.UpdateGameStatus(0, fmt.Sprintf("I have been silenced"))
+			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf(":sob: Thanks %s, now I will be silenced until %s :sob:", discord_id_format(message.Author.ID), silenced_time.Format("2006-01-02 03:04:05 MST")))
+			return
 		case "!talk":
 			silenced = false
 			silenced_time = time.Now()
-			dg.ChannelMessageSend(message.ChannelID, "I can speak again!")
+			dg.UpdateGameStatus(0, fmt.Sprintf("Birthday in %d days!", closest_birthday()))
+			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Thank you %s! I can speak again!", discord_id_format(message.Author.ID)))
+			return
 		case "!check":
 			if silenced {
 				between := silenced_time.Sub(time.Now())
 				minutes_, seconds_ := math.Modf(between.Minutes())
-				dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf(":pensive: I can't speak until %s! That's %d:%d away! :pensive:",
-					silenced_time.Format("2006-01-02 03:04:05 MST"), int(minutes_), int(seconds_*60)))
+				dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf(":pensive: %s, sadly I can't speak until %s! That's %d:%d away! :pensive:",
+					discord_id_format(message.Author.ID), silenced_time.Format("2006-01-02 03:04:05 MST"), int(minutes_), int(seconds_*60)))
 			} else {
-				dg.ChannelMessageSend(message.ChannelID, "I can speak now!")
+				dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("%s, I can already speak you silly goose!", discord_id_format(message.Author.ID)))
 			}
+			return
 		case "!quit":
 			save_to_json(true, true)
 			log.Print("Saved and Shut Down as Planned")
 			os.Exit(0)
+		case "!response":
+			hand_dm_commands("response", dg, message)
+			return
+		case "!add_me":
+			hand_dm_commands("add", dg, message)
+			return
+		case "!remove_me":
+			hand_dm_commands("remove", dg, message)
+			return
+		default: // For an unknown command
+			return
 		}
 	} else if known_user(message.Author.ID) && silenced == false && has_spoken(message.Author.ID) == false { // Check if the user is known
-		send_message = true
 		spoken = append(spoken, message.Author.ID)
-	} else if silenced == false && has_spoken(message.Author.ID) == false { // If nothing is correct
-		dg.ChannelMessageSend(message.ChannelID, "I don't know you :rage:")
+	} else if silenced == false && has_spoken(message.Author.ID) == false { // If the user isn't known
+		dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("I don't know you %s :rage:", discord_id_format(message.Author.ID)))
 		spoken = append(spoken, message.Author.ID)
-	}
-	// If send message is true check the date
-	if send_message == true {
-		// Set age
-		age := 0
-		// Get person
-		temp_p := get_user(message.Author.ID)
-		// Check for birthday
-		u_y, u_m, u_d := temp_p.Birthday.Date()
-		t_y, t_m, t_d := time.Now().Date()
-		if u_m == t_m && u_d == t_d {
-			age = t_y - u_y
-		}
-		// Check if it's the birthday or not
-		if age > 0 {
-			// Wish them a very happy birthday
-			for i := 0; i < age; i++ {
-				if i != age-1 {
-					message_text := fmt.Sprintf("Happy Birthday %s! Congratulations on having been %d!", temp_p.Name, i+1)
-					dg.ChannelMessageSend(message.ChannelID, message_text)
-					time.Sleep(time.Duration(pause) * time.Millisecond)
-				} else {
-					message_text := fmt.Sprintf("Happy Birthday %s!!! Congratulations on turning %d!", temp_p.Name, i+1)
-					dg.ChannelMessageSend(message.ChannelID, message_text)
-					time.Sleep(time.Duration(pause) * time.Millisecond)
-				}
-			}
-		} else { // Tell them one of their random quips
-			// Get a random number
-			select_num := rand.Intn(len(temp_p.Responses))
-			dg.ChannelMessageSend(message.ChannelID, temp_p.Responses[select_num])
-		}
-	} else { // If not correct return doing nothing
 		return
+	}
+	// Send result if it's a known person and it's not a command
+	// Set age
+	age := 0
+	// Get person
+	temp_p := get_user(message.Author.ID)
+	// Check for birthday
+	u_y, u_m, u_d := temp_p.Birthday.Date()
+	t_y, t_m, t_d := time.Now().Date()
+	if u_m == t_m && u_d == t_d {
+		age = t_y - u_y
+	}
+	// Check if it's the birthday or not
+	if age > 0 {
+		// Wish them a very happy birthday
+		for i := 0; i < age; i++ {
+			if i != age-1 {
+				message_text := fmt.Sprintf("Happy Birthday %s! Congratulations on having been %d!", temp_p.Name, i+1)
+				dg.ChannelMessageSend(message.ChannelID, message_text)
+				time.Sleep(time.Duration(pause) * time.Millisecond)
+			} else {
+				message_text := fmt.Sprintf("Happy Birthday %s!!! Congratulations on turning %d!", temp_p.Name, i+1)
+				dg.ChannelMessageSend(message.ChannelID, message_text)
+				time.Sleep(time.Duration(pause) * time.Millisecond)
+			}
+		}
+	} else { // Tell them one of their random quips
+		// Get a random number
+		select_num := rand.Intn(len(temp_p.Responses))
+		dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("%s, %s", discord_id_format(message.Author.ID), temp_p.Responses[select_num]))
+	}
+}
+
+// Handling the messages from DMs
+func handle_direct_messages(dg *discordgo.Session, message *discordgo.MessageCreate) {
+	// Listen to the command
+	if message.Author.ID == BotID { // Don't listen to yourself silly
+		return
+	} else if message.Author.Bot { // Don't listen to other bots, not sure why a bot would dm another but, but just in case
+		return
+	}
+	//Get the user
+	user, err := dg.UserChannelCreate(message.Author.ID)
+	if err != nil {
+		log.Print(fmt.Sprintf("Error with reading a direct message\n%v", err))
+		dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Sorry, %s there was an error with your message", discord_id_format(message.Author.ID)))
+		return
+	}
+	// If the user has an active DM
+	if !is_user_in_dm(user.ID) {
+		if DM_Sessions[user.ID] == "response" {
+			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Hello %s! Tell me the username of the user you'd like to add a response to!", discord_id_format(message.Author.ID)))
+			delete(DM_Sessions, user.ID)
+		} else if DM_Sessions[user.ID] == "add" {
+			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Hello %s! You would like to add your information!", discord_id_format(message.Author.ID)))
+			delete(DM_Sessions, user.ID)
+		} else if DM_Sessions[user.ID] == "remove" {
+			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Hello %s! You would like to delete your information!", discord_id_format(message.Author.ID)))
+			delete(DM_Sessions, user.ID)
+		}
+	} else {
+		dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("You don't have any DMs active %s!", discord_id_format(message.Author.ID)))
+	}
+}
+
+// Handling commands that interact require DMS
+func hand_dm_commands(option string, dg *discordgo.Session, message *discordgo.MessageCreate) {
+	// Get the user
+	user, err := dg.UserChannelCreate(message.Author.ID)
+	if err != nil {
+		log.Print(fmt.Sprintf("Error with getting a user for a direct message\n%v", err))
+		dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Sorry, %s there was an error in your request", discord_id_format(message.Author.ID)))
+		return
+	}
+	// If the user doesn't have an open dm add them to the map
+	if is_user_in_dm(user.ID) {
+		DM_Sessions[user.ID] = option
+		dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("I sent you a DM %s", discord_id_format(message.Author.ID)))
+		if option == "response" {
+			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Hello %s! What is the username of the person you'd like to add a response for?", discord_id_format(message.Author.ID)))
+		} else if option == "add" {
+			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Hello %s! What is your name?", discord_id_format(message.Author.ID)))
+		} else if option == "remove" {
+			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Hello %s. Exactly type \"Delete %s\" to delete data about you.", discord_id_format(message.Author.ID), discord_id_format(message.Author.ID)))
+		}
+		// If the user does have an open dm remind them
+	} else {
+		dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("You already have an open DM %s!", discord_id_format(message.Author.ID)))
 	}
 }
 
@@ -297,6 +385,21 @@ func closest_birthday() int {
 		}
 	}
 	return closest_birthday
+}
+
+// Check if the user is part of a discord session
+func is_user_in_dm(user string) bool {
+	// Check if the user doesn't already have a dm open
+	if _, ok := DM_Sessions[user]; !ok {
+		return true
+	} else {
+		return false
+	}
+}
+
+// Format the user id for discord messages
+func discord_id_format(raw string) string {
+	return fmt.Sprintf("<@%s>", raw)
 }
 
 // #endregion Discord Code
