@@ -63,9 +63,11 @@ type Person struct {
 }
 
 type DM_Response struct {
-	Option string
-	Stage  int
-	Guild  string
+	Option   string
+	Stage    int
+	Guild    string
+	Target   *discordgo.Member
+	Response string
 }
 
 // #endregion Structs
@@ -329,11 +331,6 @@ func hand_dm_quit(complete bool, dg *discordgo.Session, message *discordgo.Messa
 	}
 }
 
-// Modifying the struct holding the user DMs
-func (c *DM_Response) modify_dm_stage(new_value int) {
-	c.Stage = new_value
-}
-
 // Handling the response command DM
 func hand_dm_response(stage int, dg *discordgo.Session, message *discordgo.MessageCreate) {
 	// If the user quits
@@ -341,44 +338,64 @@ func hand_dm_response(stage int, dg *discordgo.Session, message *discordgo.Messa
 		hand_dm_quit(false, dg, message)
 	}
 	switch stage {
-	case 0:
+	case 0: // Ask if they wanted to add a response to a user
 		if message.Content == "Yes" {
 			dg.ChannelMessageSend(message.ChannelID, "Great! What is the username of the user you'd like to add a response to?")
-			fmt.Println(DM_Sessions[message.Author.ID].Stage)
 			DM_Sessions[message.Author.ID].Stage = 1
 		} else if message.Content == "No" {
-			hand_dm_quit(true, dg, message)
+			hand_dm_quit(false, dg, message)
 		} else {
 			dg.ChannelMessageSend(message.ChannelID, "That input was incorrect!\n\"Yes\" or \"No\"")
 		}
-	case 1:
+	case 1: // Ask for the user they wanted
 		// Search the server for matching users
 		users, err := dg.GuildMembersSearch(DM_Sessions[message.Author.ID].Guild, message.Content, 1)
 		if err != nil {
 			print("uh oh")
 			return
 		}
-		// Get a list of valid users
-		var valid_results []*discordgo.Member
+		// Get a list of valid users (discord shouldn't ever allow multiple of the same username)
+		var valid_user *discordgo.Member
 		for i := 0; i < len(users); i++ {
 			// fmt.Println("------- Value\n", users[i])      // Value
 			// fmt.Println("------- *Value\n", *users[i])    // Value
 			// fmt.Println("------- &Pointer\n-", &users[i]) // Pointer
 			if users[i].User.Username == message.Content {
-				valid_results = append(valid_results, users[i])
+				valid_user = users[i]
+				break
 			}
 		}
 		// Ask the user which user is correct if there are multiple somehow, but discord shouldn't ever allow that
-		if len(valid_results) >= 1 {
-			temp_string := "0: None of these are the user"
-			for x := 0; x < len(valid_results); x++ {
-				temp_string = temp_string + fmt.Sprintf("\n%d: %s", x, discord_id_format(valid_results[x].User.ID))
-			}
-			temp_string = temp_string + "Please return the number corresponding to the correct user!"
-			dg.ChannelMessageSend(message.ChannelID, temp_string)
+		if valid_user != nil {
+			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("I found the user %s! Are they the correct user?\n\"Yes\" or \"No\"", discord_id_format(valid_user.User.ID)))
 			DM_Sessions[message.Author.ID].Stage = 2
+			DM_Sessions[message.Author.ID].Target = valid_user
 		} else {
 			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Sorry %s, I can't find anyone with that username in that server. Send me another username to try again!", discord_id_format(message.Author.ID)))
+		}
+	case 2: // Have them confirm the user
+		if message.Content == "Yes" {
+			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Great! Tell me the response you would like to add to %s!", discord_id_format(DM_Sessions[message.Author.ID].Target.User.ID)))
+			DM_Sessions[message.Author.ID].Stage = 3
+		} else if message.Content == "No" {
+			dg.ChannelMessageSend(message.ChannelID, "No problem! Give me another username!")
+			DM_Sessions[message.Author.ID].Stage = 1
+		} else {
+			dg.ChannelMessageSend(message.ChannelID, "That input was incorrect!\n\"Yes\" or \"No\"")
+		}
+	case 3: // Ask them to confirm the response
+		dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Type \"Yes\" or \"No\" to confirm this is the response you want for %s\n%s", discord_id_format(DM_Sessions[message.Author.ID].Target.User.ID), message.Content))
+		DM_Sessions[message.Author.ID].Stage = 4
+		DM_Sessions[message.Author.ID].Response = message.Content
+	case 4: // Check if they confirmed or denied the response
+		if message.Content == "Yes" {
+			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Great! I'll add the response to %s", discord_id_format(DM_Sessions[message.Author.ID].Target.User.ID)))
+			hand_dm_quit(true, dg, message)
+		} else if message.Content == "No" {
+			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("No problem! Tell me the response you would like to add to %s!", discord_id_format(DM_Sessions[message.Author.ID].Target.User.ID)))
+			DM_Sessions[message.Author.ID].Stage = 3
+		} else {
+			dg.ChannelMessageSend(message.ChannelID, "That input was incorrect!\n\"Yes\" or \"No\"")
 		}
 	}
 }
