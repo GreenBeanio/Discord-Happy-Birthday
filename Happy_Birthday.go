@@ -63,11 +63,12 @@ type Person struct {
 }
 
 type DM_Response struct {
-	Option   string
-	Stage    int
-	Guild    string
-	TargetID string
-	Response string
+	Option     string
+	Stage      int
+	Guild      string
+	TargetID   string
+	Response   string
+	LastUpdate time.Time
 }
 
 // #endregion Structs
@@ -271,7 +272,7 @@ func handle_server_messages(dg *discordgo.Session, message *discordgo.MessageCre
 	}
 }
 
-// Handling commands that interact require DMS
+// Handling commands that interact require DMs
 func hand_dm_commands(option string, dg *discordgo.Session, message *discordgo.MessageCreate) {
 	// Get the user
 	user, err := dg.UserChannelCreate(message.Author.ID)
@@ -282,12 +283,14 @@ func hand_dm_commands(option string, dg *discordgo.Session, message *discordgo.M
 	}
 	// If the user doesn't have an open dm add them to the map
 	if is_user_in_dm(message.Author.ID) {
-		temp := DM_Response{Option: option, Stage: 0, Guild: message.GuildID}
+		temp := DM_Response{Option: option, Stage: 0, Guild: message.GuildID, LastUpdate: time.Now()}
 		DM_Sessions[message.Author.ID] = &temp
 		fmt.Println(DM_Sessions)
 		dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("I sent you a DM %s", discord_id_format(message.Author.ID)))
+		// Introductory messages
+		default_message := fmt.Sprintf("Hello %s! You can type \"Quit\" at any time to stop your request.", discord_id_format(message.Author.ID))
 		if option == "response" {
-			dg.ChannelMessageSend(user.ID, fmt.Sprintf("Hello %s! Did you mean to add a response to a user?\n\"Yes\" or \"No\"", discord_id_format(message.Author.ID)))
+			dg.ChannelMessageSend(user.ID, fmt.Sprintf("%s\nDid you mean to add a response to a user?\n\"Yes\" or \"No\"", default_message))
 		} // else if option == "add" {
 		// 	dg.ChannelMessageSend(user.ID, fmt.Sprintf("Hello %s! What is your name?", discord_id_format(message.Author.ID)))
 		// } else if option == "remove" {
@@ -302,6 +305,9 @@ func hand_dm_commands(option string, dg *discordgo.Session, message *discordgo.M
 func handle_direct_messages(dg *discordgo.Session, message *discordgo.MessageCreate) {
 	// If the user has an active DM
 	if !is_user_in_dm(message.Author.ID) {
+		// Update the DM time
+		DM_Sessions[message.Author.ID].LastUpdate = time.Now()
+		// Select which command is being used
 		switch DM_Sessions[message.Author.ID].Option {
 		case "response":
 			hand_dm_response(DM_Sessions[message.Author.ID].Stage, dg, message)
@@ -336,6 +342,7 @@ func hand_dm_response(stage int, dg *discordgo.Session, message *discordgo.Messa
 	// If the user quits
 	if message.Content == "Quit" {
 		hand_dm_quit(false, dg, message)
+		return
 	}
 	switch stage {
 	case 0: // Ask if they wanted to add a response to a user
