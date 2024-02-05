@@ -66,7 +66,7 @@ type DM_Response struct {
 	Option   string
 	Stage    int
 	Guild    string
-	Target   *discordgo.Member
+	TargetID string
 	Response string
 }
 
@@ -369,13 +369,13 @@ func hand_dm_response(stage int, dg *discordgo.Session, message *discordgo.Messa
 		if valid_user != nil {
 			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("I found the user %s! Are they the correct user?\n\"Yes\" or \"No\"", discord_id_format(valid_user.User.ID)))
 			DM_Sessions[message.Author.ID].Stage = 2
-			DM_Sessions[message.Author.ID].Target = valid_user
+			DM_Sessions[message.Author.ID].TargetID = valid_user.User.ID
 		} else {
 			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Sorry %s, I can't find anyone with that username in that server. Send me another username to try again!", discord_id_format(message.Author.ID)))
 		}
-	case 2: // Have them confirm the user
+	case 2: // Have them confirm the user !!!((((Need to add a check that the user is currently in the system))))!!!
 		if message.Content == "Yes" {
-			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Great! Tell me the response you would like to add to %s!", discord_id_format(DM_Sessions[message.Author.ID].Target.User.ID)))
+			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Great! Tell me the response you would like to add to %s!", discord_id_format(DM_Sessions[message.Author.ID].TargetID)))
 			DM_Sessions[message.Author.ID].Stage = 3
 		} else if message.Content == "No" {
 			dg.ChannelMessageSend(message.ChannelID, "No problem! Give me another username!")
@@ -384,15 +384,18 @@ func hand_dm_response(stage int, dg *discordgo.Session, message *discordgo.Messa
 			dg.ChannelMessageSend(message.ChannelID, "That input was incorrect!\n\"Yes\" or \"No\"")
 		}
 	case 3: // Ask them to confirm the response
-		dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Type \"Yes\" or \"No\" to confirm this is the response you want for %s\n%s", discord_id_format(DM_Sessions[message.Author.ID].Target.User.ID), message.Content))
+		dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Type \"Yes\" or \"No\" to confirm this is the response you want for %s\n%s", discord_id_format(DM_Sessions[message.Author.ID].TargetID), message.Content))
 		DM_Sessions[message.Author.ID].Stage = 4
 		DM_Sessions[message.Author.ID].Response = message.Content
 	case 4: // Check if they confirmed or denied the response
 		if message.Content == "Yes" {
-			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Great! I'll add the response to %s", discord_id_format(DM_Sessions[message.Author.ID].Target.User.ID)))
+			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Great! I'll add the response to %s", discord_id_format(DM_Sessions[message.Author.ID].TargetID)))
+			// Implement adding to the json
+			add_response(message.Author.ID, DM_Sessions[message.Author.ID].Response)
+			///
 			hand_dm_quit(true, dg, message)
 		} else if message.Content == "No" {
-			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("No problem! Tell me the response you would like to add to %s!", discord_id_format(DM_Sessions[message.Author.ID].Target.User.ID)))
+			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("No problem! Tell me the response you would like to add to %s!", discord_id_format(DM_Sessions[message.Author.ID].TargetID)))
 			DM_Sessions[message.Author.ID].Stage = 3
 		} else {
 			dg.ChannelMessageSend(message.ChannelID, "That input was incorrect!\n\"Yes\" or \"No\"")
@@ -480,6 +483,23 @@ func is_user_in_dm(user string) bool {
 // Format the user id for discord messages
 func discord_id_format(raw string) string {
 	return fmt.Sprintf("<@%s>", raw)
+}
+
+// Add response to user
+func add_response(sender_id string, new_response string) {
+	Person_Index := 0
+	Person_Found := false
+	for i := 0; i < len(People); i++ {
+		if People[i].Id == DM_Sessions[sender_id].TargetID {
+			Person_Index = i
+			Person_Found = true
+			break
+		}
+	}
+	fmt.Println(People[Person_Index].Responses)
+	if Person_Found {
+		People[Person_Index].Responses = append(People[Person_Index].Responses, DM_Sessions[sender_id].Response)
+	}
 }
 
 // #endregion Discord Code
