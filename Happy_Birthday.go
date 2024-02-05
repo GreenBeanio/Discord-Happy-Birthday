@@ -43,7 +43,7 @@ var People []Person                        // Variable to hold people
 var Discord_Credentials Discord_Credential // Variable to hold discord token
 
 // Variable for tracking direct message sessions (Trying a map instead of a struct)
-var DM_Sessions = map[string]DM_Response{}
+var DM_Sessions = map[string]*DM_Response{}
 
 // #endregion Variables
 
@@ -63,8 +63,9 @@ type Person struct {
 }
 
 type DM_Response struct {
-	option string
-	stage  int
+	Option string
+	Stage  int
+	Guild  string
 }
 
 // #endregion Structs
@@ -133,7 +134,7 @@ func main_discord(done chan bool) {
 	// Creating the handler to scan the messages
 	dg.AddHandler(Happy_Birthday)
 	// Add intents
-	dg.Identify.Intents = discordgo.IntentsAllWithoutPrivileged
+	dg.Identify.Intents = discordgo.IntentsAllWithoutPrivileged | discordgo.IntentsGuildMembers
 	// Attempting to open the connection to the bot
 	err = dg.Open()
 	if err != nil {
@@ -279,7 +280,9 @@ func hand_dm_commands(option string, dg *discordgo.Session, message *discordgo.M
 	}
 	// If the user doesn't have an open dm add them to the map
 	if is_user_in_dm(message.Author.ID) {
-		DM_Sessions[message.Author.ID] = DM_Response{option: option, stage: 0}
+		temp := DM_Response{Option: option, Stage: 0, Guild: message.GuildID}
+		DM_Sessions[message.Author.ID] = &temp
+		fmt.Println(DM_Sessions)
 		dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("I sent you a DM %s", discord_id_format(message.Author.ID)))
 		if option == "response" {
 			dg.ChannelMessageSend(user.ID, fmt.Sprintf("Hello %s! Did you mean to add a response to a user?\n\"Yes\" or \"No\"", discord_id_format(message.Author.ID)))
@@ -297,9 +300,9 @@ func hand_dm_commands(option string, dg *discordgo.Session, message *discordgo.M
 func handle_direct_messages(dg *discordgo.Session, message *discordgo.MessageCreate) {
 	// If the user has an active DM
 	if !is_user_in_dm(message.Author.ID) {
-		switch DM_Sessions[message.Author.ID].option {
+		switch DM_Sessions[message.Author.ID].Option {
 		case "response":
-			hand_dm_response(DM_Sessions[message.Author.ID].stage, dg, message)
+			hand_dm_response(DM_Sessions[message.Author.ID].Stage, dg, message)
 		case "add":
 			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Hello %s! You would like to add your information!", discord_id_format(message.Author.ID)))
 			delete(DM_Sessions, message.Author.ID)
@@ -326,6 +329,11 @@ func hand_dm_quit(complete bool, dg *discordgo.Session, message *discordgo.Messa
 	}
 }
 
+// Modifying the struct holding the user DMs
+func (c *DM_Response) modify_dm_stage(new_value int) {
+	c.Stage = new_value
+}
+
 // Handling the response command DM
 func hand_dm_response(stage int, dg *discordgo.Session, message *discordgo.MessageCreate) {
 	// If the user quits
@@ -336,14 +344,42 @@ func hand_dm_response(stage int, dg *discordgo.Session, message *discordgo.Messa
 	case 0:
 		if message.Content == "Yes" {
 			dg.ChannelMessageSend(message.ChannelID, "Great! What is the username of the user you'd like to add a response to?")
+			fmt.Println(DM_Sessions[message.Author.ID].Stage)
+			DM_Sessions[message.Author.ID].Stage = 1
 		} else if message.Content == "No" {
-			dg.ChannelMessageSend(message.ChannelID, "No problem. Talk to you next time!")
+			hand_dm_quit(true, dg, message)
 		} else {
-			dg.ChannelMessageSend(message.ChannelID, "That input was incorrect!")
-			// Go back to the first input
+			dg.ChannelMessageSend(message.ChannelID, "That input was incorrect!\n\"Yes\" or \"No\"")
 		}
 	case 1:
-		dg.User("767878567760625675")
+		// Search the server for matching users
+		users, err := dg.GuildMembersSearch(DM_Sessions[message.Author.ID].Guild, message.Content, 1)
+		if err != nil {
+			print("uh oh")
+			return
+		}
+		// Get a list of valid users
+		var valid_results []*discordgo.Member
+		for i := 0; i < len(users); i++ {
+			// fmt.Println("------- Value\n", users[i])      // Value
+			// fmt.Println("------- *Value\n", *users[i])    // Value
+			// fmt.Println("------- &Pointer\n-", &users[i]) // Pointer
+			if users[i].User.Username == message.Content {
+				valid_results = append(valid_results, users[i])
+			}
+		}
+		// Ask the user which user is correct if there are multiple somehow, but discord shouldn't ever allow that
+		if len(valid_results) >= 1 {
+			temp_string := "0: None of these are the user"
+			for x := 0; x < len(valid_results); x++ {
+				temp_string = temp_string + fmt.Sprintf("\n%d: %s", x, discord_id_format(valid_results[x].User.ID))
+			}
+			temp_string = temp_string + "Please return the number corresponding to the correct user!"
+			dg.ChannelMessageSend(message.ChannelID, temp_string)
+			DM_Sessions[message.Author.ID].Stage = 2
+		} else {
+			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Sorry %s, I can't find anyone with that username in that server. Send me another username to try again!", discord_id_format(message.Author.ID)))
+		}
 	}
 }
 
