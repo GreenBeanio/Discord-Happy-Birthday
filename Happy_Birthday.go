@@ -367,13 +367,19 @@ func hand_dm_response(stage int, dg *discordgo.Session, message *discordgo.Messa
 		}
 		// Ask the user which user is correct if there are multiple somehow, but discord shouldn't ever allow that
 		if valid_user != nil {
-			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("I found the user %s! Are they the correct user?\n\"Yes\" or \"No\"", discord_id_format(valid_user.User.ID)))
-			DM_Sessions[message.Author.ID].Stage = 2
-			DM_Sessions[message.Author.ID].TargetID = valid_user.User.ID
+			// Check if the user is known
+			if known_user(valid_user.User.ID) {
+				dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("I found the user %s! Are they the correct user?\n\"Yes\" or \"No\"", discord_id_format(valid_user.User.ID)))
+				DM_Sessions[message.Author.ID].Stage = 2
+				DM_Sessions[message.Author.ID].TargetID = valid_user.User.ID
+			} else { // If the user is unknown
+				dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("I found the user %s! OH NO! They aren't registered! Would you like to try a different user?\n\"Yes\" or \"No\"", discord_id_format(valid_user.User.ID)))
+				DM_Sessions[message.Author.ID].Stage = 5
+			}
 		} else {
 			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Sorry %s, I can't find anyone with that username in that server. Send me another username to try again!", discord_id_format(message.Author.ID)))
 		}
-	case 2: // Have them confirm the user !!!((((Need to add a check that the user is currently in the system))))!!!
+	case 2: // Have them confirm the user
 		if message.Content == "Yes" {
 			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Great! Tell me the response you would like to add to %s!", discord_id_format(DM_Sessions[message.Author.ID].TargetID)))
 			DM_Sessions[message.Author.ID].Stage = 3
@@ -390,13 +396,20 @@ func hand_dm_response(stage int, dg *discordgo.Session, message *discordgo.Messa
 	case 4: // Check if they confirmed or denied the response
 		if message.Content == "Yes" {
 			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Great! I'll add the response to %s", discord_id_format(DM_Sessions[message.Author.ID].TargetID)))
-			// Implement adding to the json
 			add_response(message.Author.ID, DM_Sessions[message.Author.ID].Response)
-			///
 			hand_dm_quit(true, dg, message)
 		} else if message.Content == "No" {
 			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("No problem! Tell me the response you would like to add to %s!", discord_id_format(DM_Sessions[message.Author.ID].TargetID)))
 			DM_Sessions[message.Author.ID].Stage = 3
+		} else {
+			dg.ChannelMessageSend(message.ChannelID, "That input was incorrect!\n\"Yes\" or \"No\"")
+		}
+	case 5: // Confirming if they'd like to try another person if there desired person isn't registered
+		if message.Content == "Yes" {
+			dg.ChannelMessageSend(message.ChannelID, "Sorry for the inconvenience! What is the username of the new user you'd like to add a response to?")
+			DM_Sessions[message.Author.ID].Stage = 1
+		} else if message.Content == "No" {
+			hand_dm_quit(false, dg, message)
 		} else {
 			dg.ChannelMessageSend(message.ChannelID, "That input was incorrect!\n\"Yes\" or \"No\"")
 		}
@@ -487,19 +500,14 @@ func discord_id_format(raw string) string {
 
 // Add response to user
 func add_response(sender_id string, new_response string) {
-	Person_Index := 0
-	Person_Found := false
+	// Shouldn't need to worry about the person being found, because that should've been determined earlier
 	for i := 0; i < len(People); i++ {
 		if People[i].Id == DM_Sessions[sender_id].TargetID {
-			Person_Index = i
-			Person_Found = true
+			People[i].Responses = append(People[i].Responses, DM_Sessions[sender_id].Response)
 			break
 		}
 	}
-	fmt.Println(People[Person_Index].Responses)
-	if Person_Found {
-		People[Person_Index].Responses = append(People[Person_Index].Responses, DM_Sessions[sender_id].Response)
-	}
+	save_to_json(true, false)
 }
 
 // #endregion Discord Code
