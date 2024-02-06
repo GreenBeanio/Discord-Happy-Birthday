@@ -195,9 +195,10 @@ func handle_server_messages(dg *discordgo.Session, message *discordgo.MessageCre
 		switch sent_command {
 		case "!help":
 			dg.ChannelMessageSend(message.ChannelID,
-				"```!help\t\tTo show more commands.\n!silence\tTo silence the bot for an hour.\n!talk\t\tTo un-silence the bot.\n"+
-					"!check\tCheck the time until un-silenced.\n!response\tTo add a response to another user.\n!add\tTo register yourself as a user.\n"+
-					"!remove\tTo remove yourself as a user.\n!update\tTo update your user information.```")
+				"```!help\t\t  To show more commands.\n!silence\t   To silence the bot for an hour.\n!talk\t\t  To un-silence the bot.\n"+
+					"!check\t\t Check the time until un-silenced.\n!response\t  To add a response to another user.\n"+
+					"!add\t\t   To register yourself as a user.\n"+
+					"!remove\t\tTo remove yourself as a user.\n!update\t\tTo update your user information.```")
 			return
 		case "!silence":
 			silenced = true
