@@ -389,7 +389,7 @@ func hand_person_delete(dg *discordgo.Session, message *discordgo.MessageCreate)
 func hand_dm_response(stage int, dg *discordgo.Session, message *discordgo.MessageCreate) {
 	// If the user quits
 	if message.Content == "Quit" {
-		hand_dm_quit(false, dg, message)
+		hand_dm_quit(true, dg, message)
 		return
 	}
 	switch stage {
@@ -420,10 +420,12 @@ func hand_dm_response(stage int, dg *discordgo.Session, message *discordgo.Messa
 				break
 			}
 		}
-		// Ask the user which user is correct if there are multiple somehow, but discord shouldn't ever allow that
+		// Ask the user which user is correct
 		if valid_user != nil {
-			// Check if the user is known
-			if known_user(valid_user.User.ID) {
+			// First make sure it isn't themselves, we don't want people making their own responses that's not fun!
+			if message.Author.ID == valid_user.User.ID {
+				dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("%s, You silly goose! That's you! You can't add a response to yourself! That's no fun! Send me another username to try again!", discord_id_format(message.Author.ID)))
+			} else if known_user(valid_user.User.ID) { // Check if the user is known
 				dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("I found the user %s! Are they the correct user?\n\"Yes\" or \"No\"", discord_id_format(valid_user.User.ID)))
 				DM_Sessions[message.Author.ID].Stage = 2
 				DM_Sessions[message.Author.ID].TargetID = valid_user.User.ID
@@ -475,7 +477,7 @@ func hand_dm_response(stage int, dg *discordgo.Session, message *discordgo.Messa
 func hand_dm_add(stage int, dg *discordgo.Session, message *discordgo.MessageCreate) {
 	// If the user quits
 	if message.Content == "Quit" {
-		hand_dm_quit(false, dg, message)
+		hand_dm_quit(true, dg, message)
 		return
 	}
 	switch stage {
@@ -596,11 +598,11 @@ func hand_dm_add(stage int, dg *discordgo.Session, message *discordgo.MessageCre
 	}
 }
 
-// Hadling the remove_me command
+// Handling the remove_me command
 func hand_dm_remove(stage int, dg *discordgo.Session, message *discordgo.MessageCreate) {
 	// If the user quits
 	if message.Content == "Quit" {
-		hand_dm_quit(false, dg, message)
+		hand_dm_quit(true, dg, message)
 		return
 	}
 	switch stage {
@@ -629,7 +631,7 @@ func hand_dm_remove(stage int, dg *discordgo.Session, message *discordgo.Message
 func hand_dm_edit(stage int, dg *discordgo.Session, message *discordgo.MessageCreate) {
 	// If the user quits
 	if message.Content == "Quit" {
-		hand_dm_quit(false, dg, message)
+		hand_dm_quit(true, dg, message)
 		return
 	}
 	switch stage {
