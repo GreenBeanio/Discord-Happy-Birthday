@@ -2,18 +2,19 @@ package main
 
 // #region Imports
 import (
-	"bufio"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"log"
-	"math"
-	"math/rand"
-	"os"
-	"strings"
-	"time"
+	"bufio"         // For writing to files
+	"encoding/json" // For marshalling (encoding) and unmarshalling (decoding) json
+	"errors"        // For handling errors
+	"fmt"           // For formatting strings
+	"log"           // For logging information
+	"math"          // For doing math functions
+	"math/rand"     // For getting random numbers (not cryptographic)
+	"os"            // For operating with the operating system for files
+	"strconv"       // For converting strings to ints and vice versa
+	"strings"       // For doing string operations
+	"time"          // For usings times and dates
 
-	"github.com/bwmarrin/discordgo"
+	"github.com/bwmarrin/discordgo" // For the underlying discord bot
 )
 
 // #endregion Imports
@@ -62,6 +63,7 @@ type Person struct {
 	Responses []string  `json:"responses"`
 }
 
+// / Structure to hold DM information
 type DM_Response struct {
 	Option     string
 	Stage      int
@@ -69,6 +71,8 @@ type DM_Response struct {
 	TargetID   string
 	Response   string
 	LastUpdate time.Time
+	Add_Cat    map[int]string
+	Person     Person
 }
 
 // #endregion Structs
@@ -183,7 +187,7 @@ func handle_server_messages(dg *discordgo.Session, message *discordgo.MessageCre
 		dg.UpdateGameStatus(0, fmt.Sprintf("Birthday in %d days!", closest_birthday()))
 	}
 	// Listen to the user inputs
-	if string([]rune(message.Content)[0]) == "!" { // If it is a command
+	if string([]rune(message.Content)[0]) == "!" { // If it is a command always listen, no matter if the bot is silenced or they've already spoken
 		//Split for the keyword
 		split_command := strings.Split(message.Content, " ")
 		sent_command := split_command[0]
@@ -191,13 +195,16 @@ func handle_server_messages(dg *discordgo.Session, message *discordgo.MessageCre
 		switch sent_command {
 		case "!help":
 			dg.ChannelMessageSend(message.ChannelID,
-				"```!help\t\tTo show more commands.\n!silence\tTo silence the bot for an hour.\n!talk\t\tTo un-silence the bot.\n!check\tCheck the time until un-silenced.```")
+				"```!help\t\tTo show more commands.\n!silence\tTo silence the bot for an hour.\n!talk\t\tTo un-silence the bot.\n"+
+					"!check\tCheck the time until un-silenced.\n!response\tTo add a response to another user.\n!add\tTo register yourself as a user.\n"+
+					"!remove\tTo remove yourself as a user.\n!update\tTo update your user information.```")
 			return
 		case "!silence":
 			silenced = true
 			silenced_time = time.Now().Add(time.Hour)
 			dg.UpdateGameStatus(0, fmt.Sprintf("I have been silenced"))
-			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf(":sob: Thanks %s, now I will be silenced until %s :sob:", discord_id_format(message.Author.ID), silenced_time.Format("2006-01-02 03:04:05 MST")))
+			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf(":sob: Thanks %s, now I will be silenced until %s :sob:",
+				discord_id_format(message.Author.ID), silenced_time.Format("2006-01-02 03:04:05 MST")))
 			return
 		case "!talk":
 			silenced = false
@@ -222,18 +229,21 @@ func handle_server_messages(dg *discordgo.Session, message *discordgo.MessageCre
 		case "!response":
 			hand_dm_commands("response", dg, message)
 			return
-		case "!add_me":
+		case "!add":
 			hand_dm_commands("add", dg, message)
 			return
-		case "!remove_me":
+		case "!remove":
 			hand_dm_commands("remove", dg, message)
 			return
-		case "!update_me":
+		case "!update":
 			hand_dm_commands("edit", dg, message)
+			return
 		default: // For an unknown command
 			return
 		}
-	} else if known_user(message.Author.ID) && silenced == false && has_spoken(message.Author.ID) == false { // Check if the user is known
+	} else if has_spoken(message.Author.ID) == true { // Don't let them speak again if they've spoken
+		return
+	} else if known_user(message.Author.ID) && silenced == false && has_spoken(message.Author.ID) == false { // If the user is known
 		spoken = append(spoken, message.Author.ID)
 	} else if silenced == false && has_spoken(message.Author.ID) == false { // If the user isn't known
 		dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("I don't know you %s :rage:", discord_id_format(message.Author.ID)))
@@ -267,8 +277,12 @@ func handle_server_messages(dg *discordgo.Session, message *discordgo.MessageCre
 		}
 	} else { // Tell them one of their random quips
 		// Get a random number
-		select_num := rand.Intn(len(temp_p.Responses))
-		dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("%s, %s", discord_id_format(message.Author.ID), temp_p.Responses[select_num]))
+		if len(temp_p.Responses) > 0 {
+			select_num := rand.Intn(len(temp_p.Responses))
+			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("%s, %s", discord_id_format(message.Author.ID), temp_p.Responses[select_num]))
+		} else {
+			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("%s, I'm so sorry. You have no responses :sob:", discord_id_format(message.Author.ID)))
+		}
 	}
 }
 
@@ -283,19 +297,42 @@ func hand_dm_commands(option string, dg *discordgo.Session, message *discordgo.M
 	}
 	// If the user doesn't have an open dm add them to the map
 	if is_user_in_dm(message.Author.ID) {
-		temp := DM_Response{Option: option, Stage: 0, Guild: message.GuildID, LastUpdate: time.Now()}
-		DM_Sessions[message.Author.ID] = &temp
-		fmt.Println(DM_Sessions)
-		dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("I sent you a DM %s", discord_id_format(message.Author.ID)))
-		// Introductory messages
 		default_message := fmt.Sprintf("Hello %s! You can type \"Quit\" at any time to stop your request.", discord_id_format(message.Author.ID))
-		if option == "response" {
+		// These have a bit of repeated code, but it is what is is
+		switch option {
+		case "response":
+			temp := DM_Response{Option: option, Stage: 0, Guild: message.GuildID, LastUpdate: time.Now()}
+			DM_Sessions[message.Author.ID] = &temp
+			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("I sent you a DM %s", discord_id_format(message.Author.ID)))
 			dg.ChannelMessageSend(user.ID, fmt.Sprintf("%s\nDid you mean to add a response to a user?\n\"Yes\" or \"No\"", default_message))
-		} // else if option == "add" {
-		// 	dg.ChannelMessageSend(user.ID, fmt.Sprintf("Hello %s! What is your name?", discord_id_format(message.Author.ID)))
-		// } else if option == "remove" {
-		// 	dg.ChannelMessageSend(user.ID, fmt.Sprintf("Hello %s. Exactly type \"Delete %s\" to delete data about you.", discord_id_format(message.Author.ID), discord_id_format(message.Author.ID)))
-		// }
+		case "add":
+			if known_user(message.Author.ID) {
+				dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("%s you silly goose! You're already registered!", discord_id_format(message.Author.ID)))
+			} else {
+				temp := DM_Response{Option: option, Stage: 0, Guild: message.GuildID, LastUpdate: time.Now(), Person: Person{Id: message.Author.ID}}
+				DM_Sessions[message.Author.ID] = &temp
+				dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("I sent you a DM %s", discord_id_format(message.Author.ID)))
+				dg.ChannelMessageSend(user.ID, fmt.Sprintf("%s\nDo you wish to add yourself as a user?\n\"Yes\" or \"No\"", default_message))
+			}
+		case "remove":
+			if known_user(message.Author.ID) {
+				temp := DM_Response{Option: option, Stage: 0, Guild: message.GuildID, LastUpdate: time.Now()}
+				DM_Sessions[message.Author.ID] = &temp
+				dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("I sent you a DM %s", discord_id_format(message.Author.ID)))
+				dg.ChannelMessageSend(user.ID, fmt.Sprintf("%s\nDo you want to remove yourself as a user?\n\"Yes\" or \"No\"", default_message))
+			} else {
+				dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("%s you silly goose! You're not even registered!", discord_id_format(message.Author.ID)))
+			}
+		case "edit":
+			if known_user(message.Author.ID) {
+				temp := DM_Response{Option: option, Stage: 0, Guild: message.GuildID, LastUpdate: time.Now(), Person: get_user(message.Author.ID)}
+				DM_Sessions[message.Author.ID] = &temp
+				dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("I sent you a DM %s", discord_id_format(message.Author.ID)))
+				dg.ChannelMessageSend(user.ID, "Choose which action you'd like to do..\n0: Quit\n1: Edit Name\n2: Edit Birthday\n3: Save Changes")
+			} else {
+				dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("%s you silly goose! You're not even registered!", discord_id_format(message.Author.ID)))
+			}
+		}
 	} else { // If the user does have an open dm remind them
 		dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("You already have an open DM %s!", discord_id_format(message.Author.ID)))
 	}
@@ -312,14 +349,11 @@ func handle_direct_messages(dg *discordgo.Session, message *discordgo.MessageCre
 		case "response":
 			hand_dm_response(DM_Sessions[message.Author.ID].Stage, dg, message)
 		case "add":
-			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Hello %s! You would like to add your information!", discord_id_format(message.Author.ID)))
-			delete(DM_Sessions, message.Author.ID)
+			hand_dm_add(DM_Sessions[message.Author.ID].Stage, dg, message)
 		case "remove":
-			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Hello %s! You would like to delete your information!", discord_id_format(message.Author.ID)))
-			delete(DM_Sessions, message.Author.ID)
+			hand_dm_remove(DM_Sessions[message.Author.ID].Stage, dg, message)
 		case "edit":
-			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Hello %s! You would you like to edit your information!", discord_id_format(message.Author.ID)))
-			delete(DM_Sessions, message.Author.ID)
+			hand_dm_edit(DM_Sessions[message.Author.ID].Stage, dg, message)
 		}
 	} else {
 		dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("You don't have any DMs active %s!", discord_id_format(message.Author.ID)))
@@ -335,6 +369,20 @@ func hand_dm_quit(complete bool, dg *discordgo.Session, message *discordgo.Messa
 		dg.ChannelMessageSend(message.ChannelID, "No problem. Talk to you next time!")
 		delete(DM_Sessions, message.Author.ID)
 	}
+}
+
+// Function to delete a person (and their dm)
+func hand_person_delete(dg *discordgo.Session, message *discordgo.MessageCreate) {
+	// Delete the DM from the map
+	delete(DM_Sessions, message.Author.ID)
+	// Delete the struct from the array, actually a slice, but whatever
+	for i := 0; i < len(People); i++ {
+		if People[i].Id == message.Author.ID {
+			People = append(People[:i], People[i+1:]...)
+			break
+		}
+	}
+	dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("No problem %s. I deleted your account! You can make one again at any time if you desire!", discord_id_format(message.Author.ID)))
 }
 
 // Handling the response command DM
@@ -423,6 +471,237 @@ func hand_dm_response(stage int, dg *discordgo.Session, message *discordgo.Messa
 	}
 }
 
+// Handling the add_me command DM
+func hand_dm_add(stage int, dg *discordgo.Session, message *discordgo.MessageCreate) {
+	// If the user quits
+	if message.Content == "Quit" {
+		hand_dm_quit(false, dg, message)
+		return
+	}
+	switch stage {
+	case 0: // Confirm that they want to add themselves
+		if message.Content == "Yes" {
+			// Get a list of the unfilled aspects
+			add_len := 0
+			add_string := "\n0: Quit"
+			add_result := make(map[int]string)
+			add_result[add_len] = "Quit"
+			if DM_Sessions[message.Author.ID].Person.Name == "" {
+				add_len = add_len + 1
+				add_string = add_string + fmt.Sprintf("\n%d: Name", add_len)
+				add_result[add_len] = "Name"
+			}
+			if DM_Sessions[message.Author.ID].Person.Birthday.IsZero() {
+				add_len = add_len + 1
+				add_string = add_string + fmt.Sprintf("\n%d: Birthday", add_len)
+				add_result[add_len] = "Birthday"
+			}
+			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Great! What aspect would you like to add first?%s", add_string))
+			DM_Sessions[message.Author.ID].Add_Cat = add_result
+			DM_Sessions[message.Author.ID].Stage = 1
+			DM_Sessions[message.Author.ID].Response = add_string
+		} else if message.Content == "No" {
+			hand_dm_quit(false, dg, message)
+		} else {
+			dg.ChannelMessageSend(message.ChannelID, "That input was incorrect!\n\"Yes\" or \"No\"")
+		}
+	case 1: // Get which aspect to add
+		// Get the first letter only of the response
+		var valid_response bool
+		response := string([]rune(message.Content)[0])
+		response_int, err := strconv.Atoi(response)
+		if err != nil {
+			valid_response = false
+		} else {
+			// Check if it's an allowed int
+			if response_int <= len(DM_Sessions[message.Author.ID].Add_Cat) {
+				// Check if it's 0, as it'll always be quitting
+				if response_int == 0 {
+					hand_dm_quit(false, dg, message)
+					return
+				} else {
+					valid_response = true
+				}
+			} else {
+				valid_response = false
+			}
+		}
+		// If it's a valid response
+		if valid_response {
+			DM_Sessions[message.Author.ID].Response = DM_Sessions[message.Author.ID].Add_Cat[response_int]
+			DM_Sessions[message.Author.ID].Add_Cat = make(map[int]string)
+			DM_Sessions[message.Author.ID].Stage = 2
+			switch DM_Sessions[message.Author.ID].Response {
+			case "Name":
+				dg.ChannelMessageSend(message.ChannelID, "Great! Please give me your name.")
+			case "Birthday":
+				dg.ChannelMessageSend(message.ChannelID, "Great! Please give me your birthday in the format Year-Month-Day (such as 2000-12-30).")
+			}
+		} else {
+			DM_Sessions[message.Author.ID].Stage = 0
+			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("That input was incorrect! Select one of the following to add.%s",
+				DM_Sessions[message.Author.ID].Response))
+		}
+	case 2: // Get the users value for their chosen category
+		switch DM_Sessions[message.Author.ID].Response {
+		case "Name":
+			DM_Sessions[message.Author.ID].Person.Name = message.Content
+			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Confirm you'd like to be called\n%s.\n\"Yes\" or \"No\"",
+				DM_Sessions[message.Author.ID].Person.Name))
+			DM_Sessions[message.Author.ID].Stage = 3
+		case "Birthday":
+			//Split the text up using the date format stated
+			converted_date, err := time.Parse("2006-01-02", message.Content)
+			if err != nil {
+				dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Something wen't wrong with your date %s. Let's try that again!\nPlease give me your birthday in the format Year-Month-Day (such as 2000-12-30).", discord_id_format(message.Author.ID)))
+			} else {
+				DM_Sessions[message.Author.ID].Person.Birthday = converted_date
+				dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Confirm that your birthday is\n%s.\n\"Yes\" or \"No\"",
+					DM_Sessions[message.Author.ID].Person.Birthday))
+				DM_Sessions[message.Author.ID].Stage = 3
+			}
+		}
+	case 3: // Get the users to confirm their input
+		if message.Content == "Yes" {
+			// If we have all the inputs filled in
+			if DM_Sessions[message.Author.ID].Person.Name != "" && !DM_Sessions[message.Author.ID].Person.Birthday.IsZero() {
+				People = append(People, DM_Sessions[message.Author.ID].Person)
+				save_to_json(true, false)
+				dg.ChannelMessageSend(message.ChannelID, "Great! I've added you!")
+				hand_dm_quit(true, dg, message)
+			} else { // If we need to get another response
+				switch DM_Sessions[message.Author.ID].Response {
+				case "Name":
+					dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Great! Your name is %s. Time to tell me your birthday in the format Year-Month-Day (such as 2000-12-30)!", DM_Sessions[message.Author.ID].Person.Name))
+					DM_Sessions[message.Author.ID].Response = "Birthday"
+					DM_Sessions[message.Author.ID].Stage = 2
+				case "Birthday":
+					dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Great! Your birthday is %s. Time to tell me your name!",
+						DM_Sessions[message.Author.ID].Person.Birthday))
+					DM_Sessions[message.Author.ID].Response = "Name"
+					DM_Sessions[message.Author.ID].Stage = 2
+				}
+			}
+		} else if message.Content == "No" {
+			switch DM_Sessions[message.Author.ID].Response {
+			case "Name":
+				dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Oh no! I'm sorry about that %s. Let's try that again!\nPlease give me your name.", discord_id_format(message.Author.ID)))
+			case "Birthday":
+				dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Oh no! I'm sorry about that %s. Let's try that again!\nPlease give me your birthday in the format Year-Month-Day (such as 2000-12-30).", discord_id_format(message.Author.ID)))
+			}
+			DM_Sessions[message.Author.ID].Stage = 2
+		} else {
+			dg.ChannelMessageSend(message.ChannelID, "That input was incorrect!\n\"Yes\" or \"No\"")
+		}
+	}
+}
+
+// Hadling the remove_me command
+func hand_dm_remove(stage int, dg *discordgo.Session, message *discordgo.MessageCreate) {
+	// If the user quits
+	if message.Content == "Quit" {
+		hand_dm_quit(false, dg, message)
+		return
+	}
+	switch stage {
+	case 0: // Ask if they want to delete their information
+		if message.Content == "Yes" {
+			DM_Sessions[message.Author.ID].Stage = 1
+			dg.ChannelMessageSend(message.ChannelID, "Are you absolutely sure? Your data can't be recovered.\n\"Yes\" or \"No\"")
+		} else if message.Content == "No" {
+			hand_dm_quit(false, dg, message)
+		} else {
+			dg.ChannelMessageSend(message.ChannelID, "That input was incorrect!\n\"Yes\" or \"No\"")
+		}
+	case 1:
+		if message.Content == "Yes" {
+			hand_person_delete(dg, message)
+		} else if message.Content == "No" {
+			dg.ChannelMessageSend(message.ChannelID, "Understood! You won't be deleted.\n\"Yes\" or \"No\"")
+			hand_dm_quit(false, dg, message)
+		} else {
+			dg.ChannelMessageSend(message.ChannelID, "That input was incorrect!\n\"Yes\" or \"No\"")
+		}
+	}
+}
+
+// Handling the edit_me command
+func hand_dm_edit(stage int, dg *discordgo.Session, message *discordgo.MessageCreate) {
+	// If the user quits
+	if message.Content == "Quit" {
+		hand_dm_quit(false, dg, message)
+		return
+	}
+	switch stage {
+	case 0: // Get what they want to edit
+		response := string([]rune(message.Content)[0])
+		response_int, err := strconv.Atoi(response)
+		if err != nil {
+			dg.ChannelMessageSend(message.ChannelID, "That wasn't a valid choice! Choose which action you'd like to do.\n0: Quit\n1: Edit Name\n2: Edit Birthday\n3: Save Changes")
+		} else {
+			switch response_int {
+			case 0:
+				hand_dm_quit(false, dg, message)
+			case 1:
+				DM_Sessions[message.Author.ID].Stage = 1
+				DM_Sessions[message.Author.ID].Response = "Name"
+				dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Your current name is\n%s\nWhat would you like your new name to be?", DM_Sessions[message.Author.ID].Person.Name))
+			case 2:
+				DM_Sessions[message.Author.ID].Stage = 1
+				DM_Sessions[message.Author.ID].Response = "Birthday"
+				dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Your current birthday is\n%s\nWhat is your real birthday in the format Year-Month-Day (such as 2000-12-30)?", DM_Sessions[message.Author.ID].Person.Birthday))
+			case 3:
+				DM_Sessions[message.Author.ID].Stage = 1
+				DM_Sessions[message.Author.ID].Response = "Save"
+				dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Confirm that you really want to save and overwrite your previous information.\n\"Yes\" or \"No\""))
+			default:
+				dg.ChannelMessageSend(message.ChannelID, "That wasn't a valid choice! Choose which action you'd like to do.\n0: Quit\n1: Edit Name\n2: Edit Birthday\n3: Save Changes")
+			}
+		}
+	case 1: // Get the new value
+		switch DM_Sessions[message.Author.ID].Response {
+		case "Name":
+			DM_Sessions[message.Author.ID].Person.Name = message.Content
+			dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Confirm you'd like to be called\n%s.\n\"Yes\" or \"No\"",
+				DM_Sessions[message.Author.ID].Person.Name))
+			DM_Sessions[message.Author.ID].Stage = 2
+		case "Birthday":
+			converted_date, err := time.Parse("2006-01-02", message.Content)
+			if err != nil {
+				dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Something wen't wrong with your date %s. Let's try that again!\nPlease give me your birthday in the format Year-Month-Day (such as 2000-12-30).", discord_id_format(message.Author.ID)))
+			} else {
+				DM_Sessions[message.Author.ID].Person.Birthday = converted_date
+				dg.ChannelMessageSend(message.ChannelID, fmt.Sprintf("Confirm that your birthday is\n%s.\n\"Yes\" or \"No\"",
+					DM_Sessions[message.Author.ID].Person.Birthday))
+				DM_Sessions[message.Author.ID].Stage = 2
+			}
+		case "Save":
+			switch message.Content {
+			case "Yes":
+				edit_person(message.Author.ID, DM_Sessions[message.Author.ID].Person)
+				DM_Sessions[message.Author.ID].Stage = 0
+				dg.ChannelMessageSend(message.ChannelID, "Your data has been updated! Choose which action you'd like to do.\n0: Quit\n1: Edit Name\n2: Edit Birthday\n3: Save Changes")
+			case "No":
+				DM_Sessions[message.Author.ID].Stage = 0
+				dg.ChannelMessageSend(message.ChannelID, "The updates weren't saved! Choose which action you'd like to do.\n0: Quit\n1: Edit Name\n2: Edit Birthday\n3: Save Changes")
+			default:
+				dg.ChannelMessageSend(message.ChannelID, "That input was incorrect!\n\"Yes\" or \"No\"")
+			}
+		}
+	case 2:
+		switch message.Content {
+		case "Yes":
+			DM_Sessions[message.Author.ID].Stage = 0
+			dg.ChannelMessageSend(message.ChannelID, "Recorded your change, but it hasn't been saved yet! Choose which action you'd like to do.\n0: Quit\n1: Edit Name\n2: Edit Birthday\n3: Save Changes")
+		case "No":
+			DM_Sessions[message.Author.ID].Stage = 0
+			dg.ChannelMessageSend(message.ChannelID, "Disregarded your data! Choose which action you'd like to do.\n0: Quit\n1: Edit Name\n2: Edit Birthday\n3: Save Changes")
+		default:
+			dg.ChannelMessageSend(message.ChannelID, "That input was incorrect!\n\"Yes\" or \"No\"")
+		}
+	}
+}
+
 // Check if the user is known
 func known_user(id string) bool {
 	// Check each known person
@@ -434,15 +713,37 @@ func known_user(id string) bool {
 	return false
 }
 
-// Get user
-func get_user(id string) Person {
+// Get person index
+func get_user_index(id string) int {
 	// Check each known person
 	for i := 0; i < len(People); i++ {
 		if People[i].Id == id {
-			return People[i]
+			return i
 		}
 	}
-	return Person{} // Not sure how to handle not having something to return
+	return 0 // Possibly not the best thing, but I don't expect it to happen
+}
+
+// Get user
+func get_user(id string) Person {
+	return People[get_user_index(id)]
+}
+
+// Edit person
+func edit_person(user_id string, new_person Person) {
+	index := get_user_index(user_id)
+	changed := false
+	if People[index].Name != new_person.Name {
+		People[index].Name = new_person.Name
+		changed = true
+	}
+	if People[index].Birthday != new_person.Birthday {
+		People[index].Birthday = new_person.Birthday
+		changed = true
+	}
+	if changed {
+		save_to_json(true, false)
+	}
 }
 
 // Has spoken
@@ -661,9 +962,7 @@ func both_exist(people_file string, credentials_file string) bool {
 		log.Print("Fill in the people file")
 		// Create an example file
 		People = []Person{{Id: "Discord Id Number", Name: "Name they go by", Birthday: time.Date(2024, time.January, 29, 0, 0, 0, 0, time.UTC),
-			Responses: []string{"Example Response", "Another Example Response", "As Many As You Want"}},
-			{Id: "Discord Id Number", Name: "Name they go by", Birthday: time.Date(2024, time.January, 29, 0, 0, 0, 0, time.UTC),
-				Responses: []string{"Example Response", "Another Example Response", "As Many As You Want"}}}
+			Responses: []string{"Example Response", "Another Example Response", "As Many As You Want"}}}
 		save_to_json(true, false)
 	}
 	// Test if the credentials file exists
